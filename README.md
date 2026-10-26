@@ -1,5 +1,7 @@
 # Reseloggen 🛵📍
 
+https://pholx.github.io/Reseloggen/
+
 En offline-först PWA (Progressive Web App) för att logga platser under resan. Byggd för att fungera smidigt oavsett om du är i Chiang Mai, Göteborg, Medelhavet eller någon helt annan plats i världen. All data sparas lokalt i telefonens IndexedDB och kräver inget konto.
 
 ## 🚀 Funktioner
