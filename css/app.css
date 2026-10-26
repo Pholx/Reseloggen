@@ -6,6 +6,9 @@ body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparen
 ::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
 .pb-safe { padding-bottom: env(safe-area-inset-bottom, 20px); }
 
+/* Mörk bakgrund under kartan medan tiles laddas */
+.leaflet-container { background: #111827; }
+
 /* Dark Leaflet popup */
 .leaflet-popup-content-wrapper {
   background: #111827; color: #f3f4f6;
@@ -13,11 +16,38 @@ body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparen
 }
 .leaflet-popup-tip { background: #111827; }
 .leaflet-popup-content {
-  margin: 12px; font-family: 'Inter', sans-serif;
+  /* Höger marginal lämnar plats åt stängningsknappen (24px) */
+  margin: 12px 36px 12px 12px;
+  font-family: 'Inter', sans-serif;
   font-size: 13px; line-height: 1.45;
 }
 .leaflet-popup-close-button { color: #9ca3af !important; }
 .leaflet-popup-content a { color: #60a5fa; text-decoration: underline; }
+
+/* Mörk attribution + zoom-kontroll – matchar appens tema */
+.leaflet-control-attribution {
+  background: rgba(17, 24, 39, 0.85) !important;
+  color: #9ca3af !important;
+}
+.leaflet-control-attribution a { color: #60a5fa !important; }
+.leaflet-control-attribution a:hover { color: #93c5fd !important; }
+.leaflet-bar a {
+  background-color: #1f2937 !important;
+  color: #e5e7eb !important;
+  border-bottom-color: #374151 !important;
+}
+.leaflet-bar a:hover,
+.leaflet-bar a:focus {
+  background-color: #374151 !important;
+  color: #f9fafb !important;
+}
+
+/* Disabled inputs */
+input:disabled,
+textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 /* Hide scrollbar on date filter */
 .no-scrollbar::-webkit-scrollbar { display: none; }

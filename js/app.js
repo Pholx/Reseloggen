@@ -12,7 +12,6 @@ let pendingLatLng = null;
 let pendingType = 'Egen plats';
 let itemToDelete = null;
 let isSaving = false;
-let isDownloading = false;
 
 // ---------- Elements ----------
 const $ = id => document.getElementById(id);
@@ -58,11 +57,17 @@ $('btn-install')?.addEventListener('click', async () => {
 
 // ---------- GPS ----------
 function updateLocation() {
+  if (!mapHandle) {
+    ui.showToast('Kartan laddas fortfarande, vänta en sekund.', 'error');
+    return;
+  }
+
   el.mapOverlay.classList.remove('hidden');
   el.coord.innerText = 'Söker...';
 
   if (!('geolocation' in navigator)) {
     el.mapOverlay.classList.add('hidden');
+    el.coord.innerText = 'GPS stöds ej';
     ui.showToast('GPS stöds inte. Lång-tryck på kartan för att logga plats.', 'error');
     return;
   }
@@ -155,8 +160,13 @@ function renderDateFilter(logs) {
   el.dateFilter.classList.remove('hidden');
   el.dateFilter.classList.add('flex');
 
+  // Visa år i pill-etiketten om loggen spänner över flera år
+  const years = new Set(logs.map(l => l.dateString.slice(0, 4)));
+  const multiYear = years.size > 1;
+
   const makePill = (label, dateValue, count) => {
     const b = document.createElement('button');
+    b.type = 'button';
     const selected = activeDate === dateValue;
     b.className = `px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border transition-colors ${
       selected
@@ -167,7 +177,7 @@ function renderDateFilter(logs) {
     b.addEventListener('click', () => {
       activeDate = dateValue;
       renderDateFilter(logs);
-      mapHandle.renderSaved(logs, activeDate);
+      mapHandle.renderSaved(logs, activeDate, true);
     });
     return b;
   };
@@ -175,21 +185,25 @@ function renderDateFilter(logs) {
   el.dateFilter.appendChild(makePill('Alla', null, logs.length));
   for (const [date, count] of storage.uniqueDates(logs)) {
     const [, mm, dd] = date.split('-');
-    el.dateFilter.appendChild(makePill(`${dd}/${mm}`, date, count));
+    const yy = date.slice(2, 4);
+    const label = multiYear ? `${dd}/${mm}/${yy}` : `${dd}/${mm}`;
+    el.dateFilter.appendChild(makePill(label, date, count));
   }
 }
 
 // ---------- Save / Edit modal ----------
 function openSaveModal({ name = '', type = 'Egen plats', lat, lon, existing = null }) {
   editingId = existing ? existing.id : null;
-  pendingLatLng = { lat, lon };
+  const targetLat = existing ? existing.lat : lat;
+  const targetLon = existing ? existing.lon : lon;
+  pendingLatLng = { lat: targetLat, lon: targetLon };
   pendingType = existing ? existing.type : type;
 
   $('save-title').innerText = existing ? 'Redigera plats' : 'Logga plats';
   $('input-name').value = existing ? existing.name : name;
   $('input-notes').value = existing ? (existing.notes || '') : '';
   $('btn-save-confirm').innerText = existing ? 'Spara ändringar' : 'Spara plats';
-  $('save-coords').innerText = `${lat.toFixed(5)}, ${lon.toFixed(5)} · ${pendingType}`;
+  $('save-coords').innerText = `${targetLat.toFixed(5)}, ${targetLon.toFixed(5)} · ${pendingType}`;
 
   const baseDate = existing ? new Date(existing.timestamp) : new Date();
   const yyyy = baseDate.getFullYear();
@@ -197,8 +211,13 @@ function openSaveModal({ name = '', type = 'Egen plats', lat, lon, existing = nu
   const dd = String(baseDate.getDate()).padStart(2, '0');
   const hh = String(baseDate.getHours()).padStart(2, '0');
   const min = String(baseDate.getMinutes()).padStart(2, '0');
+  const sec = String(baseDate.getSeconds()).padStart(2, '0');
   $('input-date').value = `${yyyy}-${mm}-${dd}`;
-  $('input-time').value = `${hh}:${min}`;
+  $('input-time').value = `${hh}:${min}:${sec}`;
+
+  // Lås datum/tid vid redigering – de är kopplade till filnamnsmönstret
+  $('input-date').disabled = !!existing;
+  $('input-time').disabled = !!existing;
 
   $('save-modal').classList.remove('hidden');
   $('input-name').focus();
@@ -216,11 +235,18 @@ function closeSaveModal() {
   $('input-notes').value = '';
   $('input-date').value = '';
   $('input-time').value = '';
+  $('input-date').disabled = false;
+  $('input-time').disabled = false;
 }
 
 async function saveCurrent() {
   if (isSaving || !pendingLatLng) return;
   isSaving = true;
+
+  const btn = $('btn-save-confirm');
+  const originalText = btn.innerText;
+  btn.innerText = 'Sparar...';
+  btn.disabled = true;
 
   const name = $('input-name').value.trim() || 'Namnlös plats';
   const notes = $('input-notes').value.trim();
@@ -230,8 +256,9 @@ async function saveCurrent() {
   let now;
   if (dateVal && timeVal) {
     const [y, m, d] = dateVal.split('-').map(Number);
-    const [h, min] = timeVal.split(':').map(Number);
-    now = new Date(y, m - 1, d, h, min);
+    // Stöder HH:MM:SS; sekunder faller tillbaka på 0 om webbläsaren inte stöder step="1"
+    const [h, min, sec = 0] = timeVal.split(':').map(Number);
+    now = new Date(y, m - 1, d, h, min, sec);
   } else {
     now = new Date();
   }
@@ -261,6 +288,8 @@ async function saveCurrent() {
     console.error(e);
     ui.showToast('Kunde inte spara.', 'error');
   } finally {
+    btn.innerText = originalText;
+    btn.disabled = false;
     isSaving = false;
   }
 }
@@ -276,24 +305,32 @@ async function renderHistory(logs) {
   }
   el.historyEmpty.classList.add('hidden');
 
+  // Visa år i datumrubriken om loggen spänner över flera år
+  const years = new Set(logs.map(l => l.dateString.slice(0, 4)));
+  const multiYear = years.size > 1;
+
   let currentDate = '';
   for (const item of logs) {
     if (item.dateString !== currentDate) {
       currentDate = item.dateString;
-      const [, mm, dd] = currentDate.split('-');
+      const thisDate = item.dateString;
+      const [, mm, dd] = thisDate.split('-');
+      const yy = thisDate.slice(2, 4);
+      const dateLabel = multiYear ? `${dd}/${mm}/${yy}` : `${dd}/${mm}`;
+
       const header = document.createElement('div');
       header.className = 'flex justify-between items-center mt-5 mb-2 pl-2';
       header.innerHTML = `
-        <h3 class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">${dd}/${mm}</h3>
-        <button class="text-[10px] font-bold text-blue-400 hover:text-blue-300 uppercase tracking-wider focus-on-map">
+        <h3 class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">${dateLabel}</h3>
+        <button type="button" class="text-[10px] font-bold text-blue-400 hover:text-blue-300 uppercase tracking-wider focus-on-map">
           Visa på karta →
         </button>`;
       header.querySelector('.focus-on-map').addEventListener('click', () => {
         switchTab('map');
-        activeDate = currentDate;
+        activeDate = thisDate;
         renderDateFilter(logs);
         requestAnimationFrame(() => {
-          mapHandle.renderSaved(logs, activeDate);
+          mapHandle.renderSaved(logs, activeDate, true);
         });
       });
       el.historyList.appendChild(header);
@@ -316,17 +353,17 @@ async function renderHistory(logs) {
           <div class="flex items-center gap-2 mt-1 flex-wrap">
             <span class="text-[10px] text-blue-400 font-mono bg-blue-900/30 px-1.5 py-0.5 rounded">${item.dateString}</span>
             <span class="text-[10px] text-blue-400 font-mono bg-blue-900/30 px-1.5 py-0.5 rounded">${item.timeString}</span>
-            <button data-role="copy-name" class="text-[10px] text-gray-400 hover:text-blue-400 bg-gray-900 border border-gray-700 px-2 py-0.5 rounded font-mono">
+            <button type="button" data-role="copy-name" class="text-[10px] text-gray-400 hover:text-blue-400 bg-gray-900 border border-gray-700 px-2 py-0.5 rounded font-mono">
               📋 ${pattern}
             </button>
           </div>
           ${notesHtml}
         </div>
         <div class="flex flex-col gap-1 shrink-0">
-          <button data-role="nav" class="text-gray-400 hover:text-emerald-400 bg-gray-900 p-2 rounded-lg border border-gray-700 active:scale-90" title="Navigera">
+          <button type="button" data-role="nav" class="text-gray-400 hover:text-emerald-400 bg-gray-900 p-2 rounded-lg border border-gray-700 active:scale-90" title="Navigera">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
           </button>
-          <button data-role="del" class="text-gray-500 hover:text-red-500 bg-gray-900 p-2 rounded-lg border border-gray-700 active:scale-90" title="Radera">
+          <button type="button" data-role="del" class="text-gray-500 hover:text-red-500 bg-gray-900 p-2 rounded-lg border border-gray-700 active:scale-90" title="Radera">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
           </button>
         </div>
@@ -395,31 +432,27 @@ $('btn-export-geojson').addEventListener('click', async () => {
   ui.showToast('GeoJSON nedladdad!');
 });
 
-// ---------- Kartcache ----------
-function lon2tile(lon, z) {
-  return Math.floor((lon + 180) / 360 * Math.pow(2, z));
-}
-
-function lat2tile(lat, z) {
-  const rad = lat * Math.PI / 180;
-  return Math.floor((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * Math.pow(2, z));
-}
-
+// ---------- Kartcache (OpenFreeMap) ----------
 async function updateCacheInfo() {
   const info = document.getElementById('cache-info');
   if (!info) return;
-  
+
   if (!('caches' in window)) {
     info.innerText = 'Cache API stöds ej';
     return;
   }
-  
+
   try {
-    const cache = await caches.open('tiles-v1');
+    const cache = await caches.open('gl-map-offline');
     const keys = await cache.keys();
     const count = keys.length;
-    const estMB = (count * 12 / 1024).toFixed(1);
-    info.innerText = `${count} rutor · ca ${estMB} MB`;
+    if (count === 0) {
+      info.innerText = '0 filer';
+      return;
+    }
+    // Konsekvent uppskattning (~25 KB/fil), samma som clearTileCache använder
+    const estMB = (count * 25 / 1024).toFixed(1);
+    info.innerText = `${count} filer · ca ${estMB} MB`;
   } catch (e) {
     info.innerText = 'Kunde inte läsa';
   }
@@ -430,20 +463,20 @@ async function clearTileCache() {
     ui.showToast('Cache API stöds inte i denna webbläsare', 'error');
     return;
   }
-  
+
   try {
-    const cache = await caches.open('tiles-v1');
+    const cache = await caches.open('gl-map-offline');
     const keys = await cache.keys();
     const count = keys.length;
-    
+
     if (count === 0) {
       ui.showToast('Ingen cache att rensa', 'error');
       return;
     }
-    
-    const estMB = (count * 12 / 1024).toFixed(1);
-    $('cache-confirm-text').innerText = 
-      `Rensa ${count} cachade rutor (ca ${estMB} MB)?\n\nKartan måste laddas ner igen för offline-bruk.`;
+
+    const estMB = (count * 25 / 1024).toFixed(1);
+    $('cache-confirm-text').innerText =
+      `Rensa ${count} cachade kartfiler (ca ${estMB} MB)?\n\nKartan måste laddas ner igen genom att du besöker området online.`;
     el.cacheConfirmModal.classList.remove('hidden');
   } catch (e) {
     ui.showToast('Kunde inte läsa cache-info.', 'error');
@@ -456,6 +489,8 @@ $('btn-cancel-cache').addEventListener('click', () => {
 
 $('btn-confirm-cache').addEventListener('click', async () => {
   try {
+    await caches.delete('gl-map-offline');
+    // Legacy: rensa ev. gammal CARTO-cache också
     await caches.delete('tiles-v1');
     await updateCacheInfo();
     ui.showToast('Kartcache rensad!');
@@ -465,119 +500,6 @@ $('btn-confirm-cache').addEventListener('click', async () => {
   el.cacheConfirmModal.classList.add('hidden');
 });
 
-async function downloadVisibleArea() {
-  if (isDownloading) return;
-
-  const MAX_TILES = 400;
-  
-  if (!mapHandle) {
-    ui.showToast('Kartan är inte redo än', 'error');
-    return;
-  }
-  
-  if (!navigator.serviceWorker || !navigator.serviceWorker.controller) {
-    ui.showToast('Vänta någon sekund – appen förbereds.', 'error');
-    return;
-  }
-  
-  const map = mapHandle.map;
-  const bounds = map.getBounds();
-  const ne = bounds.getNorthEast();
-  const sw = bounds.getSouthWest();
-  const currentZoom = Math.round(map.getZoom());
-  
-  const minZ = Math.max(14, currentZoom - 2);
-  const maxZ = Math.min(17, currentZoom + 2);
-  
-  // Användaren har zoomat ut för långt – be dem zooma in
-  if (minZ > maxZ) {
-    ui.showToast('Zooma in till stadsdelsnivå (zoom 14+) innan du laddar ner.', 'error');
-    return;
-  }
-  
-  const tiles = [];
-  for (let z = minZ; z <= maxZ; z++) {
-    const x1 = lon2tile(sw.lng, z);
-    const x2 = lon2tile(ne.lng, z);
-    const y1 = lat2tile(ne.lat, z);
-    const y2 = lat2tile(sw.lat, z);
-    
-    for (let x = x1; x <= x2; x++) {
-      for (let y = y1; y <= y2; y++) {
-        tiles.push({ z, x, y });
-        if (tiles.length > MAX_TILES) {
-          ui.showToast(`Området är för stort (över ${MAX_TILES} rutor). Zooma in lite mer och försök igen.`, 'error');
-          return;
-        }
-      }
-    }
-  }
-  
-  if (tiles.length === 0) {
-    ui.showToast('Inget att ladda ner – zooma in på ett område först.', 'error');
-    return;
-  }
-
-  // Allt validerat – lås knappen och starta nedladdning
-  isDownloading = true;
-  const btn = document.getElementById('btn-download-area');
-  const originalText = btn.innerHTML;
-  btn.disabled = true;
-  btn.classList.add('opacity-50', 'cursor-not-allowed');
-  btn.innerHTML = '⏳ Laddar...';
-  
-  const progress = document.getElementById('download-progress');
-  const bar = document.getElementById('download-bar');
-  const text = document.getElementById('download-text');
-  progress.classList.remove('hidden');
-  bar.style.width = '0%';
-  text.innerText = `Zoom ${minZ}–${maxZ} · förbereder ${tiles.length} rutor...`;
-  
-  const retina = (window.L && L.Browser.retina) ? '@2x' : '';
-  const BATCH = 8;
-  let done = 0;
-  let failed = 0;
-  
-  try {
-    for (let i = 0; i < tiles.length; i += BATCH) {
-      const batch = tiles.slice(i, i + BATCH);
-      await Promise.all(batch.map(async t => {
-        const sub = 'abcd'[Math.abs(t.x + t.y) % 4];
-        const url = `https://${sub}.basemaps.cartocdn.com/dark_all/${t.z}/${t.x}/${t.y}${retina}.png`;
-        try {
-          await fetch(url);
-        } catch {
-          failed++;
-        }
-      }));
-      done += batch.length;
-      const pct = Math.round(done / tiles.length * 100);
-      bar.style.width = pct + '%';
-      text.innerText = `Zoom ${minZ}–${maxZ} · ${done}/${tiles.length}`;
-    }
-    
-    text.innerText = failed > 0 
-      ? `Klart! ${done - failed} rutor (zoom ${minZ}–${maxZ}), ${failed} misslyckades.`
-      : `Klart! ${tiles.length} rutor nedladdade (zoom ${minZ}–${maxZ}).`;
-    
-    await updateCacheInfo();
-    
-    setTimeout(() => {
-      progress.classList.add('hidden');
-      bar.style.width = '0%';
-    }, 3000);
-  } catch (e) {
-    console.error(e);
-    text.innerText = 'Nedladdningen avbröts.';
-  } finally {
-    isDownloading = false;
-    btn.disabled = false;
-    btn.classList.remove('opacity-50', 'cursor-not-allowed');
-    btn.innerHTML = originalText;
-  }
-}
-
-$('btn-download-area').addEventListener('click', downloadVisibleArea);
 $('btn-clear-cache').addEventListener('click', clearTileCache);
 
 // ---------- Tabs ----------
@@ -604,6 +526,9 @@ $('nav-history').addEventListener('click', () => {
 // ---------- Refresh everything ----------
 async function refreshAll() {
   const logs = await storage.getAll();
+
+  // Sortera nyast först så att historiken grupperas korrekt
+  logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
   if (activeDate && !logs.some(l => l.dateString === activeDate)) {
     activeDate = null;
@@ -655,6 +580,11 @@ window.addEventListener('load', async () => {
 
   mapHandle.onLongPress((lat, lon) => {
     openSaveModal({ name: '', type: 'Egen plats', lat, lon });
+  });
+
+  mapHandle.onEdit(async (id) => {
+    const item = await storage.findById(id);
+    if (item) openSaveModal({ existing: item });
   });
 
   await refreshAll();

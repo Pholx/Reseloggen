@@ -8,7 +8,7 @@ En offline-först PWA (Progressive Web App) för att logga platser under resan. 
 - **Logga platser** via GPS, genom att lång-trycka (eller högerklicka) på kartan, eller via Overpass-sökning ("Platser nära dig").
 - **Koppla videor**: Varje plats sparar ett exakt datum och ett filnamnsmönster (t.ex. `20261025_142533`) som du kan söka på i telefonens galleri.
 - **Datumfilter**: Visa bara markörer från en specifik dag på kartan.
-- **Kartcache**: Ladda ner valfritt område till offline-lagring, med progress-bar och cache-räknare.
+- **Kartcache**: Kartan cachas automatiskt när du besöker områden online – inget manuellt nedladdningssteg behövs.
 - **Offline-läge**: Kartan cachas, och appen fungerar helt utan nät.
 - **Export**: Ladda ner alla loggade platser som en GeoJSON-fil.
 - **Installationsbar**: Läggs till på hemskärmen som en native-app (PWA).
@@ -20,25 +20,24 @@ En offline-först PWA (Progressive Web App) för att logga platser under resan. 
 
 **Du behöver INGA API-nycklar för att använda den här appen.** Den är byggd för att vara helt gratis och öppen.
 
-1. **Karta (Leaflet + CARTO)**: Vi använder CARTO Dark Matter via Leaflets raster-tiles. Detta är en öppen, gratis tjänst som inte kräver någon nyckel och som täcker hela världen.
+1. **Karta (Leaflet + MapLibre GL JS + OpenFreeMap)**: Vi använder en vektorkarta från [OpenFreeMap](https://openfreemap.org) som renderas med **MapLibre GL JS** inuti **Leaflet** (via `leaflet-maplibre-gl`). OpenFreeMap är en öppen, gratis tjänst utan API-nyckel som täcker hela världen. Style: `https://tiles.openfreemap.org/styles/dark`.
 2. **Platsdata (Overpass API / OpenStreetMap)**: När du trycker "Platser nära dig" skickas en query till Overpass för att hitta närliggande sevärdheter, restauranger och tempel. Även detta är helt gratis och kräver ingen nyckel (appen har inbyggd fallback till en spegelserver om huvudservern är nere). Fungerar i alla länder där OpenStreetMap har data – vilket i praktiken är hela världen.
 3. **Lagring (localForage)**: Sparar data i webbläsarens IndexedDB.
 
-### Om du absolut vill byta karttjänst (t.ex. Mapbox)
+### Om du absolut vill byta karttjänst
 Om du i framtiden vill ha en annan karta och skaffar en API-nyckel (t.ex. från Mapbox), gör du så här:
+
 1. **Skaffa nyckeln**: Registrera dig på [Mapbox](https://www.mapbox.com/) och skapa en API-nyckel.
-2. **Lägg in den i koden**: Öppna `js/map.js`. Leta upp raden `L.tileLayer(...)`.
-3. **Byt ut URL:en**: Ersätt CARTO-länken med din tjänsts URL och lägg till din nyckel. Exempel för Mapbox:
+2. **Lägg in den i koden**: Öppna `js/map.js`. Leta upp raden `L.maplibreGL({ style: 'https://tiles.openfreemap.org/styles/dark' })`.
+3. **Byt ut style-URL:en** mot din tjänst. Exempel för Mapbox:
 
    ```javascript
-   L.tileLayer('https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/{z}/{x}/{y}?access_token=DIN_API_NYCKEL_HÄR', {
-       attribution: '© Mapbox © OpenStreetMap',
-       tileSize: 512,
-       zoomOffset: -1
+   L.maplibreGL({
+     style: 'https://api.mapbox.com/styles/v1/mapbox/dark-v11?access_token=DIN_API_NYCKEL_HÄR'
    }).addTo(map);
    ```
 
-4. **Uppdatera `sw.js`**: Lägg till den nya URL:en i `PRECACHE`-listan i `sw.js` för att den ska fungera offline.
+4. **Uppdatera `sw.js`**: Byt ut `tiles.openfreemap.org` mot din nya domän i fetch-hanteraren så att rätt tiles cachas offline.
 
 ---
 
@@ -80,50 +79,46 @@ Detta rekommenderas **inte** eftersom det förstör matchningen mot DJI-kamerans
 
 ## 🗺️ Kartcache & Offline-förberedelse
 
-Appen har inbyggt stöd för att ladda ner kartområden så att de fungerar offline. Du hittar **Kartcache**-sektionen i **Logg-fliken**.
+Appen använder **OpenFreeMap** (vektorkarta). Till skillnad från gamla raster-tiles behöver du **inte** ladda ner ett område manuellt. Istället **cachas kartan automatiskt** av service workern (`sw.js`) när du besöker ett område – varje tile, style-fil, sprite och font som laddas sparas i `Cache Storage` under namnet `gl-map-offline`.
 
-### Så här fungerar det
+### Så här förbereder du offline-läget
 
-Under fliken **Logg** ser du:
-- **Antal cachade rutor** och **uppskattad storlek** (t.ex. `347 rutor · ca 4,1 MB`)
-- **"⬇ Ladda ner område"** – laddar ner det kartområde som just nu visas på kartan
-- **"🗑 Rensa"** – tar bort all cachad kartdata
-
-### Så här laddar du ner ett område
-
-1. Gå till **Karta**-fliken och panorera till det område du vill kunna se offline (t.ex. Chiang Mai centrum)
-2. **Zooma till den detaljnivå du vill kunna se offline** – appen laddar zoom-nivåerna kring din nuvarande zoom (max zoom 14–17)
-3. Byt till **Logg**-fliken och tryck **"⬇ Ladda ner område"**
-4. En progress-bar visar status: *"Zoom 14–17 · 45/120"*
-5. När det är klart: *"Klart! 120 rutor nedladdade (zoom 14–17)."*
-6. Upprepa för andra områden om du vill (t.ex. Bangkok, hemorten)
+1. Gå till **Karta**-fliken.
+2. **Panorera och zooma runt** i det område du vill kunna se offline (t.ex. Chiang Mai centrum, din hemort eller hotellområdet).
+   - Titta på zoom-nivåerna – ju mer du zoomar, desto fler detaljerade tiles laddas ner.
+   - Besök området i den detaljnivå du förväntar dig behöva offline.
+3. Byt till **Logg**-fliken och kontrollera **Kartcache**-sektionen. Där ser du antal cachade filer och uppskattad storlek (t.ex. `412 filer · ca 10,1 MB`).
+4. Upprepa för alla platser du ska besöka.
 
 ### Teknisk information
 
-- **Max antal rutor**: 500 (äldsta raderas automatiskt när gränsen nås – FIFO)
-- **Max per nedladdning**: 400 rutor (förhindrar att man laddar ner för stora områden av misstag)
-- **Uppskattad storlek**: ~12 KB per ruta → 500 rutor ≈ 6 MB
-- **Var sparas det?**: I telefonens `Cache Storage` under namnet `tiles-v1`
+- **Cache-namn**: `gl-map-offline`
+- **Max antal filer**: 3000 (FIFO – äldsta raderas automatiskt när gränsen nås)
+- **Uppskattad storlek**: ca 25 KB per fil i snitt → 3000 filer ≈ 75 MB
+- **Var sparas det?**: I telefonens `Cache Storage` under `gl-map-offline`
 
 ### När ska man rensa?
 
 - **Efter en resa** – för att frigöra utrymme och förbereda för nästa resa
-- **Om kartan visar gamla rutor** – om en stad byggts om och du vill hämta senaste versionen
+- **Om kartan visar gamla vägar** – om en stad byggts om och du vill hämta senaste versionen
 - **Om du byter resmål** – om du inte längre behöver offline-kartan för förra staden
+
+Klicka på **"🗑 Rensa kartcache"** i Logg-fliken för att tömma cachen. Du får en bekräftelsedialog med antal filer och uppskattad storlek.
 
 ---
 
 ## 📱 Offline-guide (Gör detta INNAN avresa)
 
-Appen fungerar offline på två sätt: **appen själv** (HTML/JS/CSS) cachas automatiskt, men **kartrutor** måste laddas ner manuellt via Kartcache-sektionen.
+Appen fungerar offline på två sätt: **appen själv** (HTML/JS/CSS) cachas automatiskt, och **kartdata** cachas automatiskt när du besöker ett område online.
 
 ### Steg för steg
 
 1. Öppna appen i **Chrome på telefonen** (via din GitHub Pages-URL)
 2. Lägg till på hemskärmen (Installera-knappen eller Chrome-meny → "Lägg till på startskärmen")
-3. **Ladda ner kartområden** via Kartcache-sektionen (se ovan) – gör detta för alla städer du ska besöka
-4. **Testa offline**: sätt telefonen i flygplansläge, öppna appen, panorera runt de nedladdade områdena
-5. Verifiera att dina sparade platser fortfarande syns och att popup-fönster fungerar
+3. **Panorera och zooma runt i de områden du ska besöka** – ju mer du rör dig runt desto mer cachas. Gör detta för alla städer/områden du planerar att besöka.
+4. Kontrollera i **Logg**-fliken att antalet cachade filer ökar.
+5. **Testa offline**: sätt telefonen i flygplansläge, öppna appen, panorera runt de cachade områdena.
+6. Verifiera att dina sparade platser fortfarande syns och att popup-fönster fungerar.
 
 ### Vad fungerar offline?
 
@@ -132,14 +127,14 @@ Appen fungerar offline på två sätt: **appen själv** (HTML/JS/CSS) cachas aut
 | Öppna appen | ✅ (cachas automatiskt) |
 | Se sparade platser på kartan | ✅ |
 | Klicka på markörer och se anteckningar | ✅ |
-| Panorera i nedladdade kartområden | ✅ |
+| Panorera i cachade kartområden | ✅ |
 | "Platser nära dig" (Overpass) | ❌ (kräver nät) |
 | GPS-position | ✅ (men kan vara långsam utan nät) |
 | Exportera GeoJSON | ✅ |
 
 **Om "Platser nära dig" och dataförbrukning:** En sökning skickar en liten förfrågan (150 m radie, max 20 resultat) och landar typiskt på **50–200 KB** data. Det är ungefär en femtedel av en genomsnittlig webbsida – försumbart om du har ett normalt mobilabonnemang. Du kan tryggt trycka 100 gånger utan att märka det i surfpotten.
 
-**Tips:** Gör nedladdningen både för ditt resmål och för området kring din hemort, så att appen fungerar smidigt hela vägen.
+**Tips:** Besök både ditt resmål och området kring din hemort online innan avresa, så att appen fungerar smidigt hela vägen.
 
 ---
 
@@ -158,16 +153,19 @@ Appen fungerar offline på två sätt: **appen själv** (HTML/JS/CSS) cachas aut
 ├── css/
 │   ├── app.css
 │   └── lib/
-│       └── leaflet.css
+│       ├── leaflet.css
+│       └── maplibre-gl.css
 └── js/
     ├── app.js       # Huvudlogik, UI-händelser, state
     ├── storage.js   # IndexedDB (localForage wrapper)
     ├── ui.js        # Toast, kopiering, tidsstämplar
     ├── nearby.js    # Overpass API (nwr, center)
-    ├── map.js       # Leaflet, markörer, popup-fönster
+    ├── map.js       # Leaflet + MapLibre GL JS + OpenFreeMap
     └── lib/
         ├── leaflet.js
-        └── localforage.min.js
+        ├── localforage.min.js
+        ├── maplibre-gl.js
+        └── leaflet-maplibre-gl.js
 ```
 
 ---
@@ -183,4 +181,15 @@ Under fliken **Logg**, tryck på "Exportera GeoJSON". Filen laddas ned. Du kan d
 - Service Workern (`sw.js`) ligger i roten för att kunna styra hela appens scope.
 
 ---
+
+## 🗺️ Teknisk översikt: hur kartan fungerar
+
+- **Leaflet** är huvudkartan och ansvarar för markörer, popups, zoomkontroller och long-press-event.
+- **MapLibre GL JS** renderar vektorkartan (OpenFreeMap) i en canvas.
+- **leaflet-maplibre-gl** är bryggan som gör att MapLibre-lagret beter sig som ett Leaflet-lager – zoom, panorering och markörer samverkar.
+- **OpenFreeMap** levererar style + tiles utan API-nyckel: `https://tiles.openfreemap.org/styles/dark`.
+- **Service workern** cachar automatiskt OpenFreeMap-filer (tiles, style, sprites, fonts) i `gl-map-offline` när du använder kartan online.
+
+---
+
 Skapad för äventyr – oavsett om det bär av till Asien, Europa, Amerika eller någon annanstans. Trevlig resa! 🌏

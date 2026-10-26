@@ -1,6 +1,6 @@
-const CACHE = 'reselogg-v4';
-const TILE_CACHE = 'tiles-v1';
-const MAX_TILES = 500;
+const CACHE = 'reselogg-v8';
+const GL_CACHE = 'gl-map-offline'; // OpenFreeMap vektor-data (tiles, style, sprites, fonts)
+const MAX_GL_ENTRIES = 3000; // Max antal filer för vektorkartan
 
 const PRECACHE = [
   './',
@@ -8,6 +8,7 @@ const PRECACHE = [
   './manifest.json',
   './css/app.css',
   './css/lib/leaflet.css',
+  './css/lib/maplibre-gl.css',
   './js/app.js',
   './js/storage.js',
   './js/ui.js',
@@ -15,6 +16,8 @@ const PRECACHE = [
   './js/map.js',
   './js/lib/leaflet.js',
   './js/lib/localforage.min.js',
+  './js/lib/maplibre-gl.js',
+  './js/lib/leaflet-maplibre-gl.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',
@@ -40,7 +43,7 @@ self.addEventListener('activate', e => {
     caches.keys().then(keys =>
       Promise.all(
         keys
-          .filter(k => k !== CACHE && k !== TILE_CACHE)
+          .filter(k => k !== CACHE && k !== GL_CACHE)
           .map(k => caches.delete(k))
       )
     ).then(() => self.clients.claim())
@@ -50,21 +53,23 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
 
+  // Overpass – alltid nätet (ingen cache)
   if (e.request.url.includes('overpass-api.de') || e.request.url.includes('kumi.systems')) return;
 
-  if (e.request.url.includes('basemaps.cartocdn.com')) {
+  // OpenFreeMap (vektorkartor, style, sprites, fonts) – CacheFirst med FIFO-gräns
+  if (e.request.url.includes('tiles.openfreemap.org')) {
     e.respondWith((async () => {
       const cached = await caches.match(e.request);
       if (cached) return cached;
       try {
         const res = await fetch(e.request);
         if (res && (res.ok || res.type === 'opaque')) {
-          const cache = await caches.open(TILE_CACHE);
+          const cache = await caches.open(GL_CACHE);
           const keys = await cache.keys();
-          if (keys.length >= MAX_TILES) {
-            await cache.delete(keys[0]);
+          if (keys.length >= MAX_GL_ENTRIES) {
+            await cache.delete(keys[0]); // FIFO
           }
-          cache.put(e.request, res.clone());
+          cache.put(e.request, res.clone()).catch(() => {});
         }
         return res;
       } catch {
@@ -74,6 +79,7 @@ self.addEventListener('fetch', e => {
     return;
   }
 
+  // Övriga resurser (app-skalet) – stale-while-revalidate
   e.respondWith((async () => {
     const cached = await caches.match(e.request);
     if (cached) {

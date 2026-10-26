@@ -25,6 +25,7 @@
     </script>
     <!-- Lokala bibliotek -->
     <link rel="stylesheet" href="./css/lib/leaflet.css">
+    <link rel="stylesheet" href="./css/lib/maplibre-gl.css">
     <link rel="stylesheet" href="./css/app.css">
 </head>
 <body class="bg-gray-950 text-gray-100 min-h-screen flex flex-col pb-safe">
@@ -40,7 +41,7 @@
             <p class="text-[11px] text-gray-400">Platser & videor – offline</p>
         </div>
         <div class="flex items-center gap-2">
-            <button id="btn-install" class="hidden text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg active:scale-95">
+            <button id="btn-install" type="button" class="hidden text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg active:scale-95">
                 Installera
             </button>
             <div class="flex items-center gap-1 bg-gray-800 px-2 py-1 rounded-full border border-gray-700">
@@ -64,12 +65,13 @@
                     <div class="min-w-0">
                         <p class="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Position</p>
                         <p id="coord-display" class="font-mono text-xs text-gray-200 truncate">Söker...</p>
+                        <p class="text-[10px] text-gray-500 mt-0.5">Tips: långtryck på kartan för att logga</p>
                     </div>
                     <div class="flex gap-2">
-                        <button id="btn-manual" class="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-200 active:scale-95" title="Logga manuellt">
+                        <button id="btn-manual" type="button" class="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-200 active:scale-95" title="Logga manuellt">
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                         </button>
-                        <button id="btn-refresh" class="p-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white active:scale-95">
+                        <button id="btn-refresh" type="button" title="Uppdatera GPS" class="p-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white active:scale-95">
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                         </button>
                     </div>
@@ -91,7 +93,7 @@
                 <div id="places-list" class="space-y-2"></div>
                 <div id="places-empty" class="hidden text-center p-6 bg-gray-900 rounded-xl border border-gray-800 mt-2">
                     <p class="text-gray-400 text-sm mb-4">Inga kända platser inom 150 m. Logga positionen ändå.</p>
-                    <button id="btn-save-coords" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold active:scale-[0.98]">
+                    <button id="btn-save-coords" type="button" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold active:scale-[0.98]">
                         Logga endast position 📍
                     </button>
                 </div>
@@ -103,7 +105,7 @@
             <div class="bg-gradient-to-r from-emerald-900/40 to-blue-900/40 p-5 rounded-2xl border border-gray-800">
                 <h2 class="text-xl font-bold text-white mb-1">Din reselogg</h2>
                 <p id="history-summary" class="text-xs text-gray-400 mb-4">Allt sparas lokalt i telefonen.</p>
-                <button id="btn-export-geojson" class="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold transition-all active:scale-[0.98]">
+                <button id="btn-export-geojson" type="button" class="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold transition-all active:scale-[0.98]">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                     Exportera GeoJSON
                 </button>
@@ -116,22 +118,11 @@
                     <span id="cache-info" class="text-[11px] text-gray-400 font-mono">Läser...</span>
                 </div>
                 <p class="text-[11px] text-gray-500 mb-3 leading-snug">
-                    Panorera kartan till området du vill ha offline, tryck sedan "Ladda ner område". Rensning frigör utrymme.
+                    Kartan cachas automatiskt när du besöker ett område online. Panorera runt de platser du vill ha offline <em>innan</em> du reser – sedan fungerar de utan nät. Rensning frigör utrymme.
                 </p>
-                <div class="grid grid-cols-2 gap-2">
-                    <button id="btn-download-area" class="py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold active:scale-95 transition-colors">
-                        ⬇ Ladda ner område
-                    </button>
-                    <button id="btn-clear-cache" class="py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-xs font-bold active:scale-95 transition-colors">
-                        🗑 Rensa
-                    </button>
-                </div>
-                <div id="download-progress" class="hidden mt-3">
-                    <div class="h-1 bg-gray-800 rounded-full overflow-hidden">
-                        <div id="download-bar" class="h-full bg-blue-500 transition-all duration-200" style="width: 0%"></div>
-                    </div>
-                    <p id="download-text" class="text-[10px] text-gray-400 mt-1 text-center">Laddar...</p>
-                </div>
+                <button id="btn-clear-cache" type="button" class="w-full py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-xs font-bold active:scale-95 transition-colors">
+                    🗑 Rensa kartcache
+                </button>
             </div>
 
             <div id="history-empty" class="hidden text-center py-10 bg-gray-900 rounded-xl border border-gray-800">
@@ -143,52 +134,52 @@
 
     <nav class="fixed bottom-0 w-full bg-gray-900 border-t border-gray-800 z-30 pb-safe">
         <div class="flex justify-around">
-            <button id="nav-log" class="flex-1 py-4 flex flex-col items-center text-blue-400">
+            <button id="nav-log" type="button" class="flex-1 py-4 flex flex-col items-center text-blue-400">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                 <span class="text-[10px] font-bold uppercase tracking-wider">Karta</span>
             </button>
-            <button id="nav-history" class="flex-1 py-4 flex flex-col items-center text-gray-500">
+            <button id="nav-history" type="button" class="flex-1 py-4 flex flex-col items-center text-gray-500">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
                 <span class="text-[10px] font-bold uppercase tracking-wider">Logg</span>
             </button>
         </div>
     </nav>
 
-    <div id="toast-container" class="fixed top-16 left-1/2 transform -translate-x-1/2 z-50 flex flex-col items-center space-y-2 pointer-events-none w-11/12 max-w-md"></div>
+    <div id="toast-container" class="fixed top-16 left-1/2 transform -translate-x-1/2 z-[60] flex flex-col items-center space-y-2 pointer-events-none w-11/12 max-w-md"></div>
 
     <!-- Spara/Redigera -->
     <div id="save-modal" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end justify-center">
         <div class="bg-gray-900 border-t border-gray-700 rounded-t-3xl w-full max-w-md p-5 pb-24 max-h-[92vh] overflow-y-auto">
             <div class="flex justify-between items-center mb-4">
                 <h3 id="save-title" class="text-lg font-bold text-white">Logga plats</h3>
-                <button id="btn-close-save" class="p-2 bg-gray-800 rounded-lg text-gray-400 active:scale-95">
+                <button id="btn-close-save" type="button" class="p-2 bg-gray-800 rounded-lg text-gray-400 active:scale-95">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                 </button>
             </div>
             <div class="space-y-3">
                 <div>
                     <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">Platsnamn</label>
-                    <input id="input-name" type="text" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="t.ex. Wat Chedi Luang" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-base text-gray-100 focus:outline-none focus:border-blue-500">
+                    <input id="input-name" type="text" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="t.ex. Wat Chedi Luang" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-base text-gray-100 focus:outline-none focus:border-blue-500 disabled:opacity-50">
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                     <div>
                         <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">Datum</label>
-                        <input id="input-date" type="date" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-base text-gray-100 focus:outline-none focus:border-blue-500">
+                        <input id="input-date" type="date" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-base text-gray-100 focus:outline-none focus:border-blue-500 disabled:opacity-50">
                     </div>
                     <div>
                         <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">Tid</label>
-                        <input id="input-time" type="time" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-base text-gray-100 focus:outline-none focus:border-blue-500">
+                        <input id="input-time" type="time" step="1" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-base text-gray-100 focus:outline-none focus:border-blue-500 disabled:opacity-50">
                     </div>
                 </div>
                 <div>
                     <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">Anteckningar (valfritt)</label>
-                    <textarea id="input-notes" rows="3" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Egna noter – eller klistra in videofilnamn" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-base text-gray-100 focus:outline-none focus:border-blue-500 resize-none"></textarea>
+                    <textarea id="input-notes" rows="3" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Egna noter – eller klistra in videofilnamn" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-base text-gray-100 focus:outline-none focus:border-blue-500 resize-none disabled:opacity-50"></textarea>
                 </div>
                 <p class="text-[11px] text-gray-500 bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 leading-snug">
-                    💡 Datum och klockslag sparas automatiskt. Du kan sedan söka i telefonens galleri på t.ex. <span class="font-mono text-gray-300">20261025_142533</span> för att hitta rätt video.
+                    💡 Datum och klockslag sparas automatiskt (inkl. sekunder). Du kan sedan söka i telefonens galleri på t.ex. <span class="font-mono text-gray-300">20261025_142533</span> för att hitta rätt video. Vid redigering är dessa låsta för att filnamnsmönstret ska förbli korrekt.
                 </p>
                 <p id="save-coords" class="text-[11px] text-gray-500 font-mono"></p>
-                <button id="btn-save-confirm" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-xl font-bold active:scale-[0.98]">
+                <button id="btn-save-confirm" type="button" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-xl font-bold active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed">
                     Spara plats
                 </button>
             </div>
@@ -201,8 +192,8 @@
             <h3 class="text-lg font-bold text-white mb-2">Ta bort plats?</h3>
             <p id="confirm-text" class="text-sm text-gray-400 mb-6">Är du säker?</p>
             <div class="flex gap-3">
-                <button id="btn-cancel-modal" class="flex-1 py-3 bg-gray-800 text-gray-300 rounded-xl font-medium">Avbryt</button>
-                <button id="btn-confirm-modal" class="flex-1 py-3 bg-red-600 text-white rounded-xl font-medium shadow-lg shadow-red-900/20">Ta bort</button>
+                <button id="btn-cancel-modal" type="button" class="flex-1 py-3 bg-gray-800 text-gray-300 rounded-xl font-medium">Avbryt</button>
+                <button id="btn-confirm-modal" type="button" class="flex-1 py-3 bg-red-600 text-white rounded-xl font-medium shadow-lg shadow-red-900/20">Ta bort</button>
             </div>
         </div>
     </div>
@@ -213,8 +204,8 @@
             <h3 class="text-lg font-bold text-white mb-2">Rensa kartcache?</h3>
             <p id="cache-confirm-text" class="text-sm text-gray-400 mb-6 whitespace-pre-line">Är du säker?</p>
             <div class="flex gap-3">
-                <button id="btn-cancel-cache" class="flex-1 py-3 bg-gray-800 text-gray-300 rounded-xl font-medium">Avbryt</button>
-                <button id="btn-confirm-cache" class="flex-1 py-3 bg-red-600 text-white rounded-xl font-medium shadow-lg shadow-red-900/20">Rensa</button>
+                <button id="btn-cancel-cache" type="button" class="flex-1 py-3 bg-gray-800 text-gray-300 rounded-xl font-medium">Avbryt</button>
+                <button id="btn-confirm-cache" type="button" class="flex-1 py-3 bg-red-600 text-white rounded-xl font-medium shadow-lg shadow-red-900/20">Rensa</button>
             </div>
         </div>
     </div>
@@ -222,6 +213,8 @@
     <!-- Lokala bibliotek -->
     <script src="./js/lib/leaflet.js"></script>
     <script src="./js/lib/localforage.min.js"></script>
+    <script src="./js/lib/maplibre-gl.js"></script>
+    <script src="./js/lib/leaflet-maplibre-gl.js"></script>
     <script type="module" src="./js/app.js"></script>
 </body>
 </html>

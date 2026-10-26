@@ -1,19 +1,23 @@
-// Behåll en referens till pågående förfrågan för att kunna avbryta den
-let currentController = null;
+// Håll koll på pågående batch så att vi kan avbryta vid ny sökning
+let currentBatch = null;
 
 export async function fetchNearby(lat, lon, radiusM = 150) {
-  // Avbryt föregående anrop om ett sådant pågår
-  if (currentController) {
-    currentController.abort();
+  // Avbryt föregående batch om en sådan pågår
+  if (currentBatch) {
+    currentBatch.abort();
   }
-  currentController = new AbortController();
-  const signal = currentController.signal;
 
-  let timedOut = false;
-  const timeoutId = setTimeout(() => {
-    timedOut = true;
-    currentController.abort();
-  }, 10000);
+  const batch = {
+    aborted: false,
+    currentUrlController: null,
+    abort() {
+      this.aborted = true;
+      if (this.currentUrlController) {
+        this.currentUrlController.abort();
+      }
+    }
+  };
+  currentBatch = batch;
 
   const q = `[out:json][timeout:12];
     (
@@ -32,49 +36,72 @@ export async function fetchNearby(lat, lon, radiusM = 150) {
 
   let lastError = null;
 
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, { signal });
-      if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
+  try {
+    for (const url of urls) {
+      if (batch.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
 
-      const data = await res.json();
-      clearTimeout(timeoutId);
+      // Timeout per URL så att spegelservern också får en chans
+      const controller = new AbortController();
+      batch.currentUrlController = controller;
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-      const seen = new Set();
-      const places = [];
+      try {
+        const res = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
 
-      for (const el of (data.elements || [])) {
-        const name = el.tags?.name;
-        if (!name || seen.has(name)) continue;
-        seen.add(name);
-
-        // Nodes har el.lat/el.lon, ways/relations har el.center.lat/lon
-        const pLat = el.lat ?? el.center?.lat;
-        const pLon = el.lon ?? el.center?.lon;
-        if (pLat == null || pLon == null) continue;
-
-        let type = 'Plats';
-        if (el.tags.tourism) type = 'Sevärdhet';
-        else if (el.tags.historic) type = 'Historiskt';
-        else if (el.tags.leisure) type = 'Fritid/Natur';
-        else if (el.tags.amenity) {
-          type = ['restaurant','cafe','bar','food_court'].includes(el.tags.amenity)
-            ? 'Mat & Dryck' : 'Bekvämlighet';
+        if (batch.aborted) {
+          throw new DOMException('Aborted', 'AbortError');
         }
-        places.push({ name, type, lat: pLat, lon: pLon });
-      }
-      return places;
-    } catch (err) {
-      clearTimeout(timeoutId);
-      
-      // Om anropet avbröts
-      if (err.name === 'AbortError') {
-        if (timedOut) throw new Error('Timeout');
-        throw err; // Kastar AbortError så att app.js kan ignorera det
-      }
+        if (!res.ok) {
+          throw new Error(`Overpass HTTP ${res.status}`);
+        }
 
-      console.warn(`Overpass misslyckades (${url}):`, err);
-      lastError = err;
+        const data = await res.json();
+        const seen = new Set();
+        const places = [];
+
+        for (const el of (data.elements || [])) {
+          const name = el.tags?.name;
+          if (!name || seen.has(name)) continue;
+          seen.add(name);
+
+          const pLat = el.lat ?? el.center?.lat;
+          const pLon = el.lon ?? el.center?.lon;
+          if (pLat == null || pLon == null) continue;
+
+          let type = 'Plats';
+          if (el.tags.tourism) type = 'Sevärdhet';
+          else if (el.tags.historic) type = 'Historiskt';
+          else if (el.tags.leisure) type = 'Fritid/Natur';
+          else if (el.tags.amenity) {
+            type = ['restaurant','cafe','bar','food_court'].includes(el.tags.amenity)
+              ? 'Mat & Dryck' : 'Bekvämlighet';
+          }
+          places.push({ name, type, lat: pLat, lon: pLon });
+        }
+
+        return places;
+      } catch (err) {
+        clearTimeout(timeoutId);
+
+        if (batch.aborted) {
+          throw new DOMException('Aborted', 'AbortError');
+        }
+
+        // Timeout (AbortError från vår egen timer) sparas som "Timeout"
+        if (err.name === 'AbortError') {
+          lastError = new Error('Timeout');
+        } else {
+          lastError = err;
+        }
+        console.warn(`Overpass misslyckades (${url}):`, err);
+      }
+    }
+  } finally {
+    if (currentBatch === batch) {
+      currentBatch = null;
     }
   }
 
