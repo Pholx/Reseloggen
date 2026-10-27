@@ -1,6 +1,6 @@
-const CACHE = 'reselogg-v8';
-const GL_CACHE = 'gl-map-offline'; // OpenFreeMap vektor-data (tiles, style, sprites, fonts)
-const MAX_GL_ENTRIES = 3000; // Max antal filer för vektorkartan
+const CACHE = 'reselogg-v9';
+const GL_CACHE = 'gl-map-offline';
+const MAX_GL_ENTRIES = 3000;
 
 const PRECACHE = [
   './',
@@ -53,8 +53,10 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
 
-  // Overpass – alltid nätet (ingen cache)
-  if (e.request.url.includes('overpass-api.de') || e.request.url.includes('kumi.systems')) return;
+  // Overpass – alla speglar ska alltid gå mot nätet (ingen cache)
+  if (e.request.url.includes('overpass-api.de')
+    || e.request.url.includes('kumi.systems')
+    || e.request.url.includes('private.coffee')) return;
 
   // OpenFreeMap (vektorkartor, style, sprites, fonts) – CacheFirst med FIFO-gräns
   if (e.request.url.includes('tiles.openfreemap.org')) {
@@ -67,7 +69,7 @@ self.addEventListener('fetch', e => {
           const cache = await caches.open(GL_CACHE);
           const keys = await cache.keys();
           if (keys.length >= MAX_GL_ENTRIES) {
-            await cache.delete(keys[0]); // FIFO
+            await cache.delete(keys[0]);
           }
           cache.put(e.request, res.clone()).catch(() => {});
         }

@@ -40,26 +40,22 @@ export async function copyToClipboard(text) {
 
 export function getEmoji(type) {
   return ({
-    'Mat & Dryck': '🍽️',
+    'Boende': '🛏️',
+    'Restaurang': '🍽️',
+    'Café': '☕',
     'Sevärdhet': '📸',
-    'Historiskt': '🏺',
-    'Fritid/Natur': '🌳',
-    'Bekvämlighet': '☕'
+    'Aktivitet': '🎯',
+    'Egen plats': '📍'
   })[type] || '📍';
 }
 
-// Bygg filnamnsmönster EN gång, vid sparning, och spara det på loggen.
-// Detta gör mönstret immunt mot tidszonsbyten (Chiang Mai → Göteborg).
 export function buildFilenamePattern(date = new Date()) {
   const pad = n => String(n).padStart(2, '0');
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }
 
 export function videoFilenamePattern(log) {
-  // Föredra sparat mönster (immunt mot tidszon)
   if (log.filenamePattern) return log.filenamePattern;
-
-  // Fallback för äldre loggar som saknar fältet
   const d = log.timestamp ? new Date(log.timestamp) : new Date();
   if (isNaN(d.getTime())) return 'okänt';
   return buildFilenamePattern(d);

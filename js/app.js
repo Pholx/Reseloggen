@@ -11,7 +11,9 @@ let editingId = null;
 let pendingLatLng = null;
 let pendingType = 'Egen plats';
 let itemToDelete = null;
+let confirmMode = null; // 'delete-one' | 'delete-all'
 let isSaving = false;
+let modalOpenTime = null; // används för sekund-fallback om webbläsaren inte ger sekunder
 
 // ---------- Elements ----------
 const $ = id => document.getElementById(id);
@@ -36,6 +38,23 @@ const uid = () => (crypto.randomUUID
   ? crypto.randomUUID()
   : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
 
+// ---------- Online/Offline ----------
+function updateOnlineStatus() {
+  const dot = $('status-dot');
+  const label = $('status-label');
+  if (!dot || !label) return;
+  if (navigator.onLine) {
+    dot.className = 'w-2 h-2 rounded-full bg-emerald-500';
+    label.textContent = 'Online';
+  } else {
+    dot.className = 'w-2 h-2 rounded-full bg-orange-500';
+    label.textContent = 'Offline';
+  }
+}
+window.addEventListener('online', updateOnlineStatus);
+window.addEventListener('offline', updateOnlineStatus);
+updateOnlineStatus();
+
 // ---------- PWA ----------
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('SW reg fail', e));
@@ -55,20 +74,36 @@ $('btn-install')?.addEventListener('click', async () => {
   $('btn-install').classList.add('hidden');
 });
 
+// ---------- Category selector ----------
+function setActiveCategory(type) {
+  pendingType = type;
+  document.querySelectorAll('#category-selector .cat-btn').forEach(btn => {
+    if (btn.dataset.type === type) {
+      btn.className = 'cat-btn py-2 px-1 rounded-lg border text-xs font-semibold transition-colors bg-blue-600 text-white border-blue-500';
+    } else {
+      btn.className = 'cat-btn py-2 px-1 rounded-lg border text-xs font-semibold transition-colors bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700';
+    }
+  });
+}
+
+document.querySelectorAll('#category-selector .cat-btn').forEach(btn => {
+  btn.addEventListener('click', () => setActiveCategory(btn.dataset.type));
+});
+
 // ---------- GPS ----------
+// Overlayn styrs av kartans "idle"-event (i boot). GPS-flödet nedan rör
+// aldrig overlayn, så kartan blir användbar direkt medan GPS söker.
 function updateLocation() {
   if (!mapHandle) {
     ui.showToast('Kartan laddas fortfarande, vänta en sekund.', 'error');
     return;
   }
 
-  el.mapOverlay.classList.remove('hidden');
   el.coord.innerText = 'Söker...';
 
   if (!('geolocation' in navigator)) {
-    el.mapOverlay.classList.add('hidden');
     el.coord.innerText = 'GPS stöds ej';
-    ui.showToast('GPS stöds inte. Lång-tryck på kartan för att logga plats.', 'error');
+    ui.showToast('GPS stöds inte i denna webbläsare.', 'error');
     return;
   }
 
@@ -77,15 +112,15 @@ function updateLocation() {
       currentLat = pos.coords.latitude;
       currentLon = pos.coords.longitude;
       el.coord.innerText = `${currentLat.toFixed(5)}, ${currentLon.toFixed(5)}`;
+
       mapHandle.setUser(currentLat, currentLon);
-      el.mapOverlay.classList.add('hidden');
+
       fetchAndRenderNearby();
     },
     err => {
       console.warn(err);
-      el.mapOverlay.classList.add('hidden');
       el.coord.innerText = 'GPS ej tillgänglig';
-      ui.showToast('Ingen GPS. Lång-tryck på kartan för att logga en plats.', 'error');
+      ui.showToast('Ingen GPS. Tryck på uppdatera för att försöka igen.', 'error');
     },
     { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
   );
@@ -93,7 +128,7 @@ function updateLocation() {
 
 async function fetchAndRenderNearby() {
   if (currentLat == null) return;
-  
+
   el.placesList.innerHTML = '';
   el.placesEmpty.classList.add('hidden');
   el.placesLoading.classList.remove('hidden');
@@ -106,7 +141,7 @@ async function fetchAndRenderNearby() {
     if (!places.length) {
       el.placesCount.innerText = '0 funna';
       const p = el.placesEmpty.querySelector('p');
-      if (p) p.innerText = 'Inga kända platser inom 150 m. Logga positionen ändå.';
+      if (p) p.innerText = 'Inga kända platser inom 250 m. Logga positionen ändå.';
       el.placesEmpty.classList.remove('hidden');
       return;
     }
@@ -152,7 +187,10 @@ async function fetchAndRenderNearby() {
 // ---------- Date filter ----------
 function renderDateFilter(logs) {
   el.dateFilter.innerHTML = '';
-  if (!logs.length) {
+  const uniqueDates = storage.uniqueDates(logs);
+
+  if (logs.length === 0 || uniqueDates.length <= 1) {
+    activeDate = null;
     el.dateFilter.classList.add('hidden');
     el.dateFilter.classList.remove('flex');
     return;
@@ -160,7 +198,6 @@ function renderDateFilter(logs) {
   el.dateFilter.classList.remove('hidden');
   el.dateFilter.classList.add('flex');
 
-  // Visa år i pill-etiketten om loggen spänner över flera år
   const years = new Set(logs.map(l => l.dateString.slice(0, 4)));
   const multiYear = years.size > 1;
 
@@ -178,12 +215,13 @@ function renderDateFilter(logs) {
       activeDate = dateValue;
       renderDateFilter(logs);
       mapHandle.renderSaved(logs, activeDate, true);
+      renderHistory(logs);
     });
     return b;
   };
 
   el.dateFilter.appendChild(makePill('Alla', null, logs.length));
-  for (const [date, count] of storage.uniqueDates(logs)) {
+  for (const [date, count] of uniqueDates) {
     const [, mm, dd] = date.split('-');
     const yy = date.slice(2, 4);
     const label = multiYear ? `${dd}/${mm}/${yy}` : `${dd}/${mm}`;
@@ -193,19 +231,26 @@ function renderDateFilter(logs) {
 
 // ---------- Save / Edit modal ----------
 function openSaveModal({ name = '', type = 'Egen plats', lat, lon, existing = null }) {
+  if (isSaving) return;
+
   editingId = existing ? existing.id : null;
   const targetLat = existing ? existing.lat : lat;
   const targetLon = existing ? existing.lon : lon;
   pendingLatLng = { lat: targetLat, lon: targetLon };
   pendingType = existing ? existing.type : type;
 
+  // Spara exakt tidpunkt när modalen öppnas – används som sekund-fallback
+  modalOpenTime = existing ? new Date(existing.timestamp) : new Date();
+
   $('save-title').innerText = existing ? 'Redigera plats' : 'Logga plats';
   $('input-name').value = existing ? existing.name : name;
   $('input-notes').value = existing ? (existing.notes || '') : '';
   $('btn-save-confirm').innerText = existing ? 'Spara ändringar' : 'Spara plats';
-  $('save-coords').innerText = `${targetLat.toFixed(5)}, ${targetLon.toFixed(5)} · ${pendingType}`;
+  $('save-coords').innerText = `${targetLat.toFixed(5)}, ${targetLon.toFixed(5)}`;
 
-  const baseDate = existing ? new Date(existing.timestamp) : new Date();
+  setActiveCategory(pendingType);
+
+  const baseDate = modalOpenTime;
   const yyyy = baseDate.getFullYear();
   const mm = String(baseDate.getMonth() + 1).padStart(2, '0');
   const dd = String(baseDate.getDate()).padStart(2, '0');
@@ -215,7 +260,6 @@ function openSaveModal({ name = '', type = 'Egen plats', lat, lon, existing = nu
   $('input-date').value = `${yyyy}-${mm}-${dd}`;
   $('input-time').value = `${hh}:${min}:${sec}`;
 
-  // Lås datum/tid vid redigering – de är kopplade till filnamnsmönstret
   $('input-date').disabled = !!existing;
   $('input-time').disabled = !!existing;
 
@@ -227,10 +271,11 @@ function closeSaveModal() {
   el.saveModal.classList.add('hidden');
   editingId = null;
   pendingLatLng = null;
+  modalOpenTime = null;
   if (document.activeElement && document.activeElement.blur) {
     document.activeElement.blur();
   }
-  
+
   $('input-name').value = '';
   $('input-notes').value = '';
   $('input-date').value = '';
@@ -256,16 +301,31 @@ async function saveCurrent() {
   let now;
   if (dateVal && timeVal) {
     const [y, m, d] = dateVal.split('-').map(Number);
-    // Stöder HH:MM:SS; sekunder faller tillbaka på 0 om webbläsaren inte stöder step="1"
     const [h, min, sec = 0] = timeVal.split(':').map(Number);
     now = new Date(y, m - 1, d, h, min, sec);
+
+    // Fallback: vissa webbläsare (Safari iOS, en del WebViews) ger bara HH:MM
+    // trots step="1". Om användaren inte ändrat minut/timme jämfört med
+    // modalens öppningstid, använd då modaltidens sekunder så filnamns-
+    // mönstret matchar DJI-kameran.
+    if (sec === 0 && modalOpenTime) {
+      const sameMinute =
+        now.getFullYear() === modalOpenTime.getFullYear() &&
+        now.getMonth() === modalOpenTime.getMonth() &&
+        now.getDate() === modalOpenTime.getDate() &&
+        now.getHours() === modalOpenTime.getHours() &&
+        now.getMinutes() === modalOpenTime.getMinutes();
+      if (sameMinute) {
+        now.setSeconds(modalOpenTime.getSeconds());
+      }
+    }
   } else {
     now = new Date();
   }
 
   try {
     if (editingId) {
-      await storage.update(editingId, { name, notes });
+      await storage.update(editingId, { name, notes, type: pendingType });
       ui.showToast('Uppdaterad!');
     } else {
       await storage.add({
@@ -280,6 +340,13 @@ async function saveCurrent() {
         timeString: now.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }),
         filenamePattern: ui.buildFilenamePattern(now)
       });
+
+      // Om användaren filtrerar på en annan dag – nolla filtret så nya platsen syns
+      const savedDate = now.toLocaleDateString('sv-SE');
+      if (activeDate && activeDate !== savedDate) {
+        activeDate = null;
+      }
+
       ui.showToast('Sparad!');
     }
     closeSaveModal();
@@ -296,21 +363,28 @@ async function saveCurrent() {
 
 // ---------- History ----------
 async function renderHistory(logs) {
-  el.historyList.innerHTML = '';
-  el.historySummary.innerText = `${logs.length} platser`;
+  const visible = activeDate ? logs.filter(l => l.dateString === activeDate) : logs;
 
-  if (!logs.length) {
+  el.historyList.innerHTML = '';
+
+  if (activeDate) {
+    const [, mm, dd] = activeDate.split('-');
+    el.historySummary.innerText = `${dd}/${mm} · ${visible.length} platser`;
+  } else {
+    el.historySummary.innerText = `${visible.length} platser`;
+  }
+
+  if (!visible.length) {
     el.historyEmpty.classList.remove('hidden');
     return;
   }
   el.historyEmpty.classList.add('hidden');
 
-  // Visa år i datumrubriken om loggen spänner över flera år
-  const years = new Set(logs.map(l => l.dateString.slice(0, 4)));
+  const years = new Set(visible.map(l => l.dateString.slice(0, 4)));
   const multiYear = years.size > 1;
 
   let currentDate = '';
-  for (const item of logs) {
+  for (const item of visible) {
     if (item.dateString !== currentDate) {
       currentDate = item.dateString;
       const thisDate = item.dateString;
@@ -384,7 +458,10 @@ async function renderHistory(logs) {
     div.querySelector('[data-role="del"]').addEventListener('click', (e) => {
       e.stopPropagation();
       itemToDelete = item.id;
+      confirmMode = 'delete-one';
+      $('confirm-title').innerText = 'Ta bort plats?';
       $('confirm-text').innerText = `Radera "${item.name}" från loggen?`;
+      $('btn-confirm-modal').innerText = 'Ta bort';
       el.confirmModal.classList.remove('hidden');
     });
 
@@ -392,24 +469,56 @@ async function renderHistory(logs) {
   }
 }
 
-// ---------- Delete place ----------
+// ---------- Delete place / Clear all ----------
 $('btn-cancel-modal').addEventListener('click', () => {
   el.confirmModal.classList.add('hidden');
   itemToDelete = null;
+  confirmMode = null;
 });
+
 $('btn-confirm-modal').addEventListener('click', async () => {
-  if (!itemToDelete) return;
-  await storage.remove(itemToDelete);
-  el.confirmModal.classList.add('hidden');
+  if (confirmMode === 'delete-one' && itemToDelete) {
+    await storage.remove(itemToDelete);
+    ui.showToast('Borttagen.');
+  } else if (confirmMode === 'delete-all') {
+    await storage.setAll([]);
+    activeDate = null;
+    ui.showToast('Alla platser borttagna.');
+  } else {
+    return;
+  }
   itemToDelete = null;
+  confirmMode = null;
+  el.confirmModal.classList.add('hidden');
   await refreshAll();
-  ui.showToast('Borttagen.');
+});
+
+$('btn-clear-all').addEventListener('click', async () => {
+  const all = await storage.getAll();
+  if (!all.length) {
+    ui.showToast('Inga platser att rensa.', 'error');
+    return;
+  }
+  confirmMode = 'delete-all';
+  itemToDelete = null;
+  $('confirm-title').innerText = 'Rensa alla platser?';
+  $('confirm-text').innerText = `Radera alla ${all.length} platser permanent? Detta kan inte ångras.`;
+  $('btn-confirm-modal').innerText = 'Rensa allt';
+  el.confirmModal.classList.remove('hidden');
 });
 
 // ---------- Export ----------
 $('btn-export-geojson').addEventListener('click', async () => {
-  const logs = await storage.getAll();
-  if (!logs.length) { ui.showToast('Loggen är tom.', 'error'); return; }
+  const allLogs = await storage.getAll();
+  const logs = activeDate
+    ? allLogs.filter(l => l.dateString === activeDate)
+    : allLogs;
+
+  if (!logs.length) {
+    ui.showToast(activeDate ? 'Inga platser för valt datum.' : 'Loggen är tom.', 'error');
+    return;
+  }
+
   const geojson = {
     type: 'FeatureCollection',
     features: logs.map(l => ({
@@ -426,10 +535,14 @@ $('btn-export-geojson').addEventListener('click', async () => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `Reselogg_${new Date().toLocaleDateString('sv-SE')}.geojson`;
+  a.download = activeDate
+    ? `Reselogg_${activeDate}.geojson`
+    : `Reselogg_${new Date().toLocaleDateString('sv-SE')}.geojson`;
   a.click();
   URL.revokeObjectURL(url);
-  ui.showToast('GeoJSON nedladdad!');
+  ui.showToast(activeDate
+    ? `GeoJSON för ${activeDate} nedladdad!`
+    : 'GeoJSON nedladdad!');
 });
 
 // ---------- Kartcache (OpenFreeMap) ----------
@@ -450,7 +563,6 @@ async function updateCacheInfo() {
       info.innerText = '0 filer';
       return;
     }
-    // Konsekvent uppskattning (~25 KB/fil), samma som clearTileCache använder
     const estMB = (count * 25 / 1024).toFixed(1);
     info.innerText = `${count} filer · ca ${estMB} MB`;
   } catch (e) {
@@ -490,8 +602,6 @@ $('btn-cancel-cache').addEventListener('click', () => {
 $('btn-confirm-cache').addEventListener('click', async () => {
   try {
     await caches.delete('gl-map-offline');
-    // Legacy: rensa ev. gammal CARTO-cache också
-    await caches.delete('tiles-v1');
     await updateCacheInfo();
     ui.showToast('Kartcache rensad!');
   } catch (e) {
@@ -516,18 +626,22 @@ function switchTab(which) {
   navMap.classList.toggle('text-gray-500', !activeMap);
   navHist.classList.toggle('text-blue-400', !activeMap);
   navHist.classList.toggle('text-gray-500', activeMap);
+
+  // Leaflet/MapLibre behöver veta att containern fick ny storlek
+  if (activeMap && mapHandle) {
+    setTimeout(() => mapHandle.invalidate(), 50);
+  }
 }
 $('nav-log').addEventListener('click', () => switchTab('map'));
 $('nav-history').addEventListener('click', () => {
   switchTab('history');
   updateCacheInfo();
 });
+$('btn-go-map').addEventListener('click', () => switchTab('map'));
 
 // ---------- Refresh everything ----------
 async function refreshAll() {
   const logs = await storage.getAll();
-
-  // Sortera nyast först så att historiken grupperas korrekt
   logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
   if (activeDate && !logs.some(l => l.dateString === activeDate)) {
@@ -543,7 +657,7 @@ async function refreshAll() {
 $('btn-refresh').addEventListener('click', updateLocation);
 $('btn-manual').addEventListener('click', () => {
   if (currentLat == null) {
-    ui.showToast('Ingen position. Lång-tryck på kartan för att logga manuellt.', 'error');
+    ui.showToast('Ingen position ännu. Vänta eller tryck på uppdatera.', 'error');
     return;
   }
   openSaveModal({ name: '', type: 'Egen plats', lat: currentLat, lon: currentLon });
@@ -552,7 +666,7 @@ $('btn-close-save').addEventListener('click', closeSaveModal);
 $('btn-save-confirm').addEventListener('click', saveCurrent);
 $('btn-save-coords').addEventListener('click', () => {
   if (currentLat == null) {
-    ui.showToast('Ingen position. Lång-tryck på kartan istället.', 'error');
+    ui.showToast('Ingen position. Tryck på uppdatera-ikonen ↻ först.', 'error');
     return;
   }
   openSaveModal({ name: '', type: 'Egen plats', lat: currentLat, lon: currentLon });
@@ -566,6 +680,7 @@ $('confirm-modal').addEventListener('click', (e) => {
   if (e.target.id === 'confirm-modal') {
     el.confirmModal.classList.add('hidden');
     itemToDelete = null;
+    confirmMode = null;
   }
 });
 $('cache-confirm-modal').addEventListener('click', (e) => {
@@ -578,9 +693,11 @@ $('cache-confirm-modal').addEventListener('click', (e) => {
 window.addEventListener('load', async () => {
   mapHandle = createMap('map');
 
-  mapHandle.onLongPress((lat, lon) => {
-    openSaveModal({ name: '', type: 'Egen plats', lat, lon });
-  });
+  // Overlayn styrs av kartan – inte GPS. Kartan blir användbar så snart
+  // tiles är laddade, oavsett om GPS svarat. Fallback 3 s om idle aldrig
+  // triggar (t.ex. mycket långsamt nät eller offline kallstart).
+  mapHandle.once('idle', () => el.mapOverlay.classList.add('hidden'));
+  setTimeout(() => el.mapOverlay.classList.add('hidden'), 3000);
 
   mapHandle.onEdit(async (id) => {
     const item = await storage.findById(id);

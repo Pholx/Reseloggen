@@ -184,7 +184,7 @@ Under fliken **Logg**, tryck på "Exportera GeoJSON". Filen laddas ned. Du kan d
 
 ## 🗺️ Teknisk översikt: hur kartan fungerar
 
-- **Leaflet** är huvudkartan och ansvarar för markörer, popups, zoomkontroller och long-press-event.
+- **Leaflet** är huvudkartan och ansvarar för markörer, popups och zoomkontroller.
 - **MapLibre GL JS** renderar vektorkartan (OpenFreeMap) i en canvas.
 - **leaflet-maplibre-gl** är bryggan som gör att MapLibre-lagret beter sig som ett Leaflet-lager – zoom, panorering och markörer samverkar.
 - **OpenFreeMap** levererar style + tiles utan API-nyckel: `https://tiles.openfreemap.org/styles/dark`.

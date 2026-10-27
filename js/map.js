@@ -1,21 +1,37 @@
 import { escapeHtml, getEmoji } from './ui.js';
 
+const LAST_POS_KEY = 'reselogg:lastPos';
+
+function readLastPos() {
+  try {
+    const raw = localStorage.getItem(LAST_POS_KEY);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (typeof obj?.lat === 'number' && typeof obj?.lon === 'number') return obj;
+  } catch {}
+  return null;
+}
+
+function saveLastPos(lat, lon) {
+  try {
+    localStorage.setItem(LAST_POS_KEY, JSON.stringify({ lat, lon }));
+  } catch {}
+}
+
 export function createMap(elementId) {
-  // Starta på världsöversikt. tapHold + tapTolerance aktiverar långtryck
-  // även på Android (Leaflets default är annars bara Safari mobil).
+  const last = readLastPos();
+  const startCenter = last ? [last.lat, last.lon] : [20, 0];
+  const startZoom = last ? 14 : 2;
+
   const map = L.map(elementId, {
     zoomControl: false,
-    minZoom: 2,
-    tapHold: true,
-    tapTolerance: 15
-  }).setView([20, 0], 2);
+    minZoom: 2
+  }).setView(startCenter, startZoom);
 
-  // OpenFreeMap (vektorkarta, ingen API-nyckel krävs)
-  L.maplibreGL({
+  const glLayer = L.maplibreGL({
     style: 'https://tiles.openfreemap.org/styles/dark'
   }).addTo(map);
 
-  // Attribution för OpenFreeMap / OpenStreetMap
   map.attributionControl.addAttribution(
     '<a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> ' +
     '© <a href="https://openmaptiles.org" target="_blank" rel="noopener">OpenMapTiles</a> ' +
@@ -26,25 +42,12 @@ export function createMap(elementId) {
 
   const savedLayer = L.layerGroup().addTo(map);
   let userMarker = null;
-  let onLongPress = null;
   let onEdit = null;
 
   const resizeObserver = new ResizeObserver(() => {
     map.invalidateSize();
   });
   resizeObserver.observe(map.getContainer());
-
-  // Contextmenu (högerklick desktop, long-press mobil).
-  // Skippa på markörer och popups så att användaren inte råkar öppna
-  // save-modalen när de interagerar med befintliga objekt.
-  map.on('contextmenu', (e) => {
-    const target = e.originalEvent?.target;
-    if (target && target.closest && (
-      target.closest('.leaflet-marker-icon') ||
-      target.closest('.leaflet-popup')
-    )) return;
-    if (onLongPress) onLongPress(e.latlng.lat, e.latlng.lng);
-  });
 
   function makeEmojiIcon(emoji) {
     return L.divIcon({
@@ -81,7 +84,6 @@ export function createMap(elementId) {
 
   return {
     map,
-    onLongPress(cb) { onLongPress = cb; },
     onEdit(cb) { onEdit = cb; },
 
     setUser(lat, lon, zoom = 16, pan = true) {
@@ -94,7 +96,47 @@ export function createMap(elementId) {
           iconAnchor: [9, 9]
         })
       }).addTo(map);
-      if (pan) map.flyTo([lat, lon], zoom, { duration: 1.2 });
+
+      saveLastPos(lat, lon);
+
+      if (pan) {
+        map.setView([lat, lon], zoom, { animate: false });
+      }
+    },
+
+    /**
+     * Väntar på att kartan är "idle". Ger 100 ms för setView att sätta tiles i
+     * loading-state innan vi kollar gl.loaded(). Fallback 2.5 s.
+     */
+    once(event, cb) {
+      if (event === 'idle') {
+        const gl = glLayer.getMaplibreMap?.();
+        if (!gl) { setTimeout(cb, 100); return; }
+
+        let done = false;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          cb();
+        };
+
+        setTimeout(() => {
+          if (done) return;
+          if (typeof gl.loaded === 'function' && gl.loaded()) {
+            finish();
+            return;
+          }
+          try {
+            gl.once('idle', finish);
+          } catch {
+            finish();
+            return;
+          }
+          setTimeout(finish, 2500);
+        }, 100);
+      } else {
+        map.once(event, cb);
+      }
     },
 
     renderSaved(logs, dateFilter = null, fit = false) {
