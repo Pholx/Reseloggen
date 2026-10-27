@@ -5,7 +5,7 @@ https://pholx.github.io/Reseloggen/
 En offline-först PWA (Progressive Web App) för att logga platser under resan. Byggd för att fungera smidigt oavsett om du är i Chiang Mai, Göteborg, Medelhavet eller någon helt annan plats i världen. All data sparas lokalt i telefonens IndexedDB och kräver inget konto.
 
 ## 🚀 Funktioner
-- **Logga platser** via GPS, genom att lång-trycka (eller högerklicka) på kartan, eller via Overpass-sökning ("Platser nära dig").
+- **Logga platser** via GPS på kartan, eller via Overpass-sökning ("Platser nära dig").
 - **Koppla videor**: Varje plats sparar ett exakt datum och ett filnamnsmönster (t.ex. `20261025_142533`) som du kan söka på i telefonens galleri.
 - **Datumfilter**: Visa bara markörer från en specifik dag på kartan.
 - **Kartcache**: Kartan cachas automatiskt när du besöker områden online – inget manuellt nedladdningssteg behövs.
