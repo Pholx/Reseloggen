@@ -27,6 +27,8 @@ export function createMap(elementId) {
     zoomControl: false,
     minZoom: 2
   }).setView(startCenter, startZoom);
+  // Blockera long-press/right-click-kontextmeny på kartan
+  map.getContainer().addEventListener('contextmenu', (e) => e.preventDefault());
 
   const glLayer = L.maplibreGL({
     style: 'https://tiles.openfreemap.org/styles/dark'
