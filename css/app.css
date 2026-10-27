@@ -1,13 +1,31 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
-#map { height: 320px; z-index: 10; border-radius: 0.75rem; }
+
+#map {
+  height: 320px;
+  z-index: 10;
+  border-radius: 0.75rem;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
 .pb-safe { padding-bottom: env(safe-area-inset-bottom, 20px); }
 
 /* Mörk bakgrund under kartan medan tiles laddas */
 .leaflet-container { background: #111827; }
+
+/* Förhindra long-press-menyn (iOS "Spara bild/Dela" m.m.) på markörerna.
+   Popup-innehållet lämnas valbart så att användaren kan kopiera sina
+   anteckningar. */
+.leaflet-marker-icon,
+.leaflet-marker-shadow {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
 
 /* Dark Leaflet popup */
 .leaflet-popup-content-wrapper {
